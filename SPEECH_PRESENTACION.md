@@ -33,7 +33,7 @@
 
 ### ⚓ MODERNO: ABAP Cloud, RAP y CDS
 
-"No me he quedado en el ABAP clásico. Trabajo con ABAP moderno y CDS en el día a día, estoy certificado como SAP Back-End Developer en ABAP Cloud y he construido mis propias aplicaciones RAP en BTP: managed, draft, validations, actions y side effects. Por ejemplo, tengo una app de informes de gastos que también expuse como API OData V4 y probé de principio a fin con Postman. Conozco los principios de clean core y los aplico: solo APIs liberadas."
+"No me he quedado en el ABAP clásico. Estoy familiarizado con el ABAP nuevo, el de la 7.40 en adelante, y de hecho lo he usado en proyectos de cliente, como Naturgy Nedgia o el Ayuntamiento de Madrid: declaraciones inline, expresiones constructoras como VALUE, NEW, COND o REDUCE, el nuevo ABAP SQL y CDS. Lo uso porque el código sale más corto, más legible y más rápido, ya que el trabajo lo hace la base de datos. Además, estoy certificado como SAP Back-End Developer en ABAP Cloud y he construido mis propias aplicaciones RAP en BTP: managed, draft, validations, actions y side effects. Por ejemplo, tengo una app de informes de gastos que también expuse como API OData V4 y probé de principio a fin con Postman. Conozco los principios de clean core y los aplico: solo APIs liberadas."
 
 ### ⚓ EQUIPO: cómo trabajo
 
@@ -52,6 +52,7 @@
 | Te preguntan por… | Tú dices… |
 |---|---|
 | **OData** | "He hecho OData V2 en SEGW con deep insert multinivel, function imports, adjuntos y actualización masiva, y OData V4 con RAP." |
+| **ABAP nuevo (7.40+)** | "Lo uso en proyectos de cliente: declaraciones inline, VALUE, NEW, COND, SWITCH, REDUCE, FOR y el nuevo ABAP SQL con expresiones y GROUP BY." |
 | **CDS** | "Modelo CDS con asociaciones y jerarquías padre-hijo, y los he usado como base de servicios OData." |
 | **RAP** | "Tengo práctica propia en BTP: managed, draft, validations, determinations, actions, side effects y feature control. Las extensiones RAP las conozco en teoría y aún no las he aplicado en un cliente." |
 | **IDocs** | "Llevo años con IDocs: creación, actualización y monitorización, e integración con sistemas legados." |
@@ -63,7 +64,36 @@
 
 ---
 
-## 4. Si te preguntan por puntos de mejora
+## 4. ABAP nuevo frente a ABAP clásico: qué se gana
+
+> Por si te preguntan "¿y por qué usar la sintaxis nueva?".
+
+```
+ ABAP CLÁSICO                         ABAP NUEVO (7.40+)
+ ─────────────                        ──────────────────
+ DATA arriba, lejos del uso    ──►    declaración inline, donde se usa
+ LOOP + APPEND + IF            ──►    VALUE / FOR / REDUCE / COND
+ SELECT simple + lógica en ABAP──►    ABAP SQL con expresiones (code pushdown)
+ SELECT en bucle               ──►    JOINs, CDS y asociaciones
+ READ TABLE + sy-subrc         ──►    expresiones de tabla  itab[ ... ]
+ CONCATENATE                   ──►    plantillas de texto  |...{ }...|
+```
+
+| Ganancia | Por qué |
+|---|---|
+| 📉 **Menos código** | Lo que antes ocupaba diez líneas ahora cabe en una o dos. |
+| 👀 **Más legible** | La intención se ve directamente: "construyo esta tabla", "calculo esta suma". |
+| 🐛 **Menos errores** | Menos variables auxiliares y menos `sy-subrc` olvidados. |
+| ⚡ **Más rendimiento** | Con el *code pushdown*, la base de datos (HANA) hace el trabajo pesado. |
+| ☁️ **Preparado para el futuro** | Es la base de ABAP Cloud, RAP y clean core. La sintaxis obsoleta ni siquiera compila en ABAP Cloud. |
+
+**Para decirlo en voz alta:**
+
+"El ABAP nuevo me permite escribir menos código y más claro: declaro las variables donde las uso, construyo tablas con VALUE o FOR, y las condiciones con COND en lugar de bloques IF largos. Pero la ganancia grande es el rendimiento: con el nuevo ABAP SQL y CDS llevo la lógica a la base de datos, que en HANA marca mucha diferencia. Y además es el camino obligado hacia ABAP Cloud y RAP."
+
+---
+
+## 5. Si te preguntan por puntos de mejora
 
 > Honesto, pero mostrando cómo lo estás trabajando.
 
@@ -71,7 +101,7 @@
 
 ---
 
-## 5. Cómo aprenderlo
+## 6. Cómo aprenderlo
 
 1. **Memoriza las seis anclas**, no las frases.
 2. **Lee cada bloque en voz alta 3 veces** y después dilo sin mirar, con tus palabras.
