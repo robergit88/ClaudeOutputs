@@ -85,7 +85,7 @@ Lo importante de esta semana es la columna **"Falla en"**: tienes que predecir *
 
 | ID | Qué haces | Resultado esperado | Falla en |
 |---|---|---|---|
-| **T01** | Crear **un** viaje con **2 reservas** en un solo `MODIFY`. **Antes del commit**, lee `TravelID` y `TotalPrice`. Commit y vuelve a leer | Antes: `TotalPrice` calculado, `TravelID` **vacío**. Después: `TravelID` asignado, estado `O` | — |
+| **T01** | Crear **un** viaje con **2 reservas** en un solo `MODIFY`. Leer `TravelID` y `TotalPrice` **antes y después** del commit ([ver qué se prueba](#qué-se-prueba-en-t01)) | Antes: `TotalPrice` calculado, `TravelID` **vacío**. Después: `TravelID` asignado, estado `O` | — |
 | **T02** | Leer las reservas del viaje de T01 **por asociación** | 2 reservas, cada una con su `BookingID` | — |
 | **T03** | `deductDiscount` del 10 % sobre el viaje de T01. Commit | `BookingFee` baja un 10 % y `TotalPrice` se recalcula | — |
 | **T04** ❌ | `deductDiscount` del **150 %** | `FAILED` + mensaje. `BookingFee` no cambia | `MODIFY` (lógica de la action) |
@@ -93,6 +93,21 @@ Lo importante de esta semana es la columna **"Falla en"**: tienes que predecir *
 | **T06** ❌ | Crear un viaje correcto con **1 reserva de un vuelo que no existe**. Commit | El commit falla por la **reserva**, y el viaje **tampoco** se graba | `COMMIT` (todo o nada) |
 | **T07** | `acceptTravel` sobre el viaje de T01. Commit | Estado `A` | — |
 | **T08** ❌ | `deductDiscount` sobre el viaje **aceptado** | `FAILED` del viaje. Anota **qué** `%fail-cause` devuelve | `MODIFY` (feature control) |
+
+### Qué se prueba en T01
+
+**1. Cabecera y posiciones en una sola sentencia**, enlazadas con `%CID` / `%CID_REF`. Es lo que con una BAPI harías pasando la cabecera y la tabla de posiciones en la misma llamada.
+
+**2. No todos los datos existen en el mismo momento.**
+
+> 🛒 En el supermercado, el **precio** lo ves en la pantalla del carrito mientras compras, pero el **número de ticket** solo te lo dan al pagar en caja.
+
+| Campo | Lo calcula… | ¿Tiene valor antes del commit? |
+|---|---|---|
+| `TotalPrice` (el precio) | determination `on modify` | ✅ Sí, ya está en el buffer |
+| `TravelID` (el ticket) | determination `on save` | ❌ No, hasta el commit está vacío |
+
+**Por qué importa:** `BAPI_SALESORDER_CREATEFROMDAT2` te devuelve el número de pedido en la propia llamada. Muchos BOs RAP numeran **al grabar**. Si tu programa necesita el número (para un log o para devolverlo a la web) y lo lee antes del commit, guardará un número vacío sin darse cuenta. Antes del commit solo tienes el UUID de `MAPPED`.
 
 ### Comprobación visual (2 minutos)
 
