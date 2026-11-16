@@ -7,32 +7,15 @@
 
 ---
 
-## 0. Antes de nada: la idea con analogías
+## 0. La idea en una analogía
 
-### 🛒 La transacción es una compra en el supermercado
+🛒 **Una transacción RAP es una compra en el supermercado.**
 
-| En el súper | En RAP | Qué aprendes |
-|---|---|---|
-| Vas metiendo productos en el **carrito** | `MODIFY ENTITIES` → los cambios van al **buffer transaccional** | Nada está grabado todavía |
-| El reponedor **no te deja coger** un producto retirado de la venta | **Feature control**, autorización, **precheck**: fallan **en el `MODIFY`** | Hay errores que salen al meter en el carrito |
-| Pasas por **caja** | `COMMIT ENTITIES` → **save sequence** | Solo ahora se graba |
-| La cajera comprueba la tarjeta y ve que está **caducada** | **Validations** `on save`: fallan **en el `COMMIT`** | Hay errores que solo salen al pagar |
-| Si un producto falla en caja, **no se cobra nada** | **Todo o nada**: si una reserva falla, el viaje tampoco se graba | La LUW es una unidad |
-| **Vaciar el carrito** y volver a empezar | `ROLLBACK ENTITIES` | Si no lo vacías, arrastras lo que había |
-| El **ticket** te lo dan en caja, no antes | `TravelID` se asigna `on save` | Algunos datos solo existen tras el commit |
-| La hoja de incidencias: **qué** productos se rechazaron y **por qué** | `FAILED` (qué instancia) + `REPORTED` (qué mensaje) | Siempre hay que mirar los dos |
+Con `MODIFY` vas llenando el **carrito** (el buffer): todavía no has comprado nada. Con `COMMIT` pasas por **caja** y solo entonces se graba. Y la compra es **todo o nada**: si algo falla en caja, no se cobra nada.
 
-### 🧳 `%CID` es la etiqueta de la maleta antes de facturar
+Lo importante es que hay **dos momentos en los que te pueden decir que no**: al coger el producto de la estantería (en el `MODIFY`) o al pagar en caja (en el `COMMIT`). Esta semana vas a aprender a saber cuál de los dos te va a pasar.
 
-En el mostrador del aeropuerto, antes de tener el número de facturación, le pones a tus cosas una etiqueta provisional: "maleta 1", "maleta 2". Así, si la maleta 2 va dentro del viaje 1, se sabe a quién pertenece.
-
-- `%CID` = la etiqueta provisional que pones **tú**.
-- `%CID_REF` = "esta reserva pertenece a la maleta con la etiqueta X".
-- `MAPPED` = el **resguardo** que te devuelve el mostrador: "la etiqueta 'viaje 1' es el UUID 4F2A…".
-
-### 🏦 La interfaz de BO es la ventanilla del banco
-
-Tú no entras en la cámara acorazada (las tablas `/DMO/A_*`). Pides por **ventanilla** (`/DMO/I_Travel_D`) y el empleado aplica **sus** reglas. Solo puedes pedir lo que la ventanilla ofrece (`use create`, `use action acceptTravel`…). Si mañana el banco reorganiza la cámara, tu petición sigue funcionando: ese es el **contrato**.
+Y el supermercado no es tuyo: solo puedes comprar lo que está en sus estanterías (lo que ofrece la interfaz `/DMO/I_Travel_D`), con sus reglas.
 
 ---
 
@@ -57,46 +40,18 @@ Tú no entras en la cámara acorazada (las tablas `/DMO/A_*`). Pides por **venta
 
 ---
 
-## 2. El flujo en un diagrama
+## 2. Dónde puede fallar
 
 ```mermaid
 flowchart LR
-    C[ZCL_W01_TRAVEL_IMPORT<br/>clase de consola] -- "MODIFY / READ / EXECUTE" --> I[["/DMO/I_Travel_D<br/>(ventanilla)"]]
-    I --> FC{"Feature control<br/>precheck · autorización<br/>lógica de la action"}
-    FC -- "❌ FAILED del MODIFY<br/>(el reponedor)" --> C
-    FC -- OK --> BUF[(Buffer<br/>= carrito)]
-    C -- "COMMIT ENTITIES<br/>(caja)" --> SS[Save sequence]
-    BUF --> SS
-    SS --> DET["Determinations on save<br/>TravelID, BookingID"]
-    DET --> VAL{"Validations<br/>fechas · cliente · vuelo"}
-    VAL -- "❌ FAILED del COMMIT<br/>(tarjeta caducada)" --> C
-    VAL -- OK --> DB[(BD)]
+    M[MODIFY] --> B[(Buffer)] --> C[COMMIT] --> D[(BD)]
+    M -. "❌ feature control<br/>precheck · action" .-> F1[FAILED del MODIFY]
+    C -. "❌ validations" .-> F2[FAILED del COMMIT]
 ```
 
 ---
 
-## 3. Escenario
-
-> Una **agencia online** recibe cada noche las solicitudes de viaje de su web. Un programa en SAP (el tuyo) las convierte en viajes con sus reservas, aplica descuentos y acepta los que estén listos. Nadie está delante: **si algo falla, el programa debe saberlo y no dejar basura.**
-
-```mermaid
-stateDiagram-v2
-    [*] --> O : T01 crear viaje + 2 reservas
-    O --> O : T03 descuento 10 % ✅
-    O --> O : T04 descuento 150 % ❌
-    O --> A : T07 acceptTravel ✅
-    A --> A : T08 descuento ❌ bloqueado
-    state "Nunca llegan a grabarse" as N {
-        T05 : T05 fecha en el pasado ❌
-        T06 : T06 vuelo inexistente ❌
-    }
-```
-
-`O` = Open, `A` = Accepted, `X` = Rejected (constantes del BO).
-
----
-
-## 4. Lo que tienes que construir
+## 3. Lo que tienes que construir
 
 Una clase **`ZCL_W01_TRAVEL_IMPORT`** que implemente `if_oo_adt_classrun` (se ejecuta con **F9** en ADT).
 
@@ -124,7 +79,7 @@ flowchart TD
 
 ---
 
-## 5. Casos de prueba
+## 4. Casos de prueba
 
 Lo importante de esta semana es la columna **"Falla en"**: tienes que predecir **dónde** sale cada error antes de ejecutarlo.
 
@@ -165,7 +120,7 @@ T08 ✅ Rechazado en MODIFY · causa <la que obtengas>
 
 ---
 
-## 6. Pistas (ábrelas solo si te atascas)
+## 5. Pistas (ábrelas solo si te atascas)
 
 <details>
 <summary>Antes de empezar · ¿qué ofrece la ventanilla?</summary>
@@ -219,7 +174,7 @@ El `FAILED` del `MODIFY` saldrá vacío. El error está en la respuesta del `COM
 
 ---
 
-## 7. Reto extra (opcional)
+## 6. Reto extra (opcional)
 
 | Reto | Qué aprendes |
 |---|---|
@@ -229,7 +184,7 @@ El `FAILED` del `MODIFY` saldrá vacío. El error está en la respuesta del `COM
 
 ---
 
-## 8. Preguntas de reflexión
+## 7. Preguntas de reflexión
 
 Respóndelas con tus palabras en el README del ejercicio. Son lo que miraré con más atención.
 
@@ -242,7 +197,7 @@ Respóndelas con tus palabras en el README del ejercicio. Son lo que miraré con
 
 ---
 
-## 9. Repaso (cap. 3)
+## 8. Repaso (cap. 3)
 
 - [ ] `/DMO/R_Travel_D` tiene `authorization master ( global, instance )`. ¿Qué métodos obliga a implementar?
 - [ ] Tiene `create ( precheck )`. ¿En qué se diferencia de una validation `on save { create; }`?
@@ -251,11 +206,11 @@ Respóndelas con tus palabras en el README del ejercicio. Son lo que miraré con
 
 ---
 
-## 10. Entrega y revisión
+## 9. Entrega y revisión
 
 **Entrega:** carpeta nueva en tu repo (p. ej. `Entrenamiento/01-eml-consumidor/`) con:
 
-- `README.md`: captura de la consola + respuestas del §8 y del §9.
+- `README.md`: captura de la consola + respuestas del §7 y del §8.
 - El código de la clase (en markdown, como haces ahora).
 
 **Qué revisaré:**
