@@ -9,20 +9,20 @@
 
 ## 1. Qué sustituye del ABAP tradicional
 
-| ABAP tradicional | RAP / EML | Diferencia clave |
+| RAP / EML | ABAP tradicional | Diferencia clave |
 |---|---|---|
-| `BAPI_*_CREATE` | `MODIFY ENTITIES … CREATE` | Masivo: N instancias en una llamada |
-| Tablas de posiciones en la BAPI (`ITEMS`, `PARTNERS`…) | `CREATE BY \_Booking` + `%CID_REF` | Cabecera y posiciones en **la misma sentencia** |
-| `BAPI_*_GETDETAIL` | `READ ENTITIES` | Lee el **buffer**: ve lo no grabado |
-| `BAPI_*_CHANGE` + estructura **X** (`…X` / checkbox) | `UPDATE FIELDS ( … )` / `%control` | Misma idea: indicar qué campos cambian |
-| Tabla `RETURN` (`BAPIRET2`) | `FAILED` + `REPORTED` | Separan **qué** falló de **por qué** |
-| `BAPI_TRANSACTION_COMMIT` | `COMMIT ENTITIES` | Igual: lo pone el dueño de la transacción |
-| `BAPI_TRANSACTION_ROLLBACK` | `ROLLBACK ENTITIES` | Igual |
-| `ENQUEUE_E…` / `DEQUEUE_E…` | Automático (`lock master`) | Solo usarías `SET LOCKS` para otros BO |
-| `AUTHORITY-CHECK` en tu programa | Lo hace el BO | Tú no lo programas: el BO te rechaza |
-| `CALL FUNCTION … IN UPDATE TASK` | Save sequence | El framework decide el orden |
-| Batch input / `CALL TRANSACTION` | EML | Ya no se simula la pantalla |
-| Número de documento en el `EXPORTING` de la BAPI | `MAPPED` + releer tras el commit | Con numeración `on save`, el número llega **después** |
+| `MODIFY ENTITIES … CREATE` | `BAPI_*_CREATE` | Masivo: N instancias en una llamada |
+| `CREATE BY \_Booking` + `%CID_REF` | Tablas de posiciones en la BAPI (`ITEMS`, `PARTNERS`…) | Cabecera y posiciones en **la misma sentencia** |
+| `READ ENTITIES` | `BAPI_*_GETDETAIL` | Lee el **buffer**: ve lo no grabado |
+| `UPDATE FIELDS ( … )` / `%control` | `BAPI_*_CHANGE` + estructura **X** (`…X` / checkbox) | Misma idea: indicar qué campos cambian |
+| `FAILED` + `REPORTED` | Tabla `RETURN` (`BAPIRET2`) | Separan **qué** falló de **por qué** |
+| `COMMIT ENTITIES` | `BAPI_TRANSACTION_COMMIT` | Igual: lo pone el dueño de la transacción |
+| `ROLLBACK ENTITIES` | `BAPI_TRANSACTION_ROLLBACK` | Igual |
+| Automático (`lock master`) | `ENQUEUE_E…` / `DEQUEUE_E…` | Solo usarías `SET LOCKS` para otros BO |
+| Lo hace el BO | `AUTHORITY-CHECK` en tu programa | Tú no lo programas: el BO te rechaza |
+| Save sequence | `CALL FUNCTION … IN UPDATE TASK` | El framework decide el orden |
+| EML | Batch input / `CALL TRANSACTION` | Ya no se simula la pantalla |
+| `MAPPED` + releer tras el commit | Número de documento en el `EXPORTING` de la BAPI | Con numeración `on save`, el número llega **después** |
 
 > ⚠️ **La gran diferencia con una BAPI:** la BAPI comprueba casi todo **al llamarla**. RAP deja muchas comprobaciones (las validations) **para el commit**. Por eso un `MODIFY` sin errores **no** garantiza que se vaya a grabar.
 
