@@ -7,18 +7,6 @@
 
 ---
 
-## 0. La idea en una analogía
-
-🛒 **Una transacción RAP es una compra en el supermercado.**
-
-Con `MODIFY` vas llenando el **carrito** (el buffer): todavía no has comprado nada. Con `COMMIT` pasas por **caja** y solo entonces se graba. Y la compra es **todo o nada**: si algo falla en caja, no se cobra nada.
-
-Lo importante es que hay **dos momentos en los que te pueden decir que no**: al coger el producto de la estantería (en el `MODIFY`) o al pagar en caja (en el `COMMIT`). Esta semana vas a aprender a saber cuál de los dos te va a pasar.
-
-Y el supermercado no es tuyo: solo puedes comprar lo que está en sus estanterías (lo que ofrece la interfaz `/DMO/I_Travel_D`), con sus reglas.
-
----
-
 ## 1. Qué sustituye del ABAP tradicional
 
 | ABAP tradicional | RAP / EML | Diferencia clave |
@@ -40,18 +28,7 @@ Y el supermercado no es tuyo: solo puedes comprar lo que está en sus estanterí
 
 ---
 
-## 2. Dónde puede fallar
-
-```mermaid
-flowchart LR
-    M[MODIFY] --> B[(Buffer)] --> C[COMMIT] --> D[(BD)]
-    M -. "❌ feature control<br/>precheck · action" .-> F1[FAILED del MODIFY]
-    C -. "❌ validations" .-> F2[FAILED del COMMIT]
-```
-
----
-
-## 3. Lo que tienes que construir
+## 2. Lo que tienes que construir
 
 Una clase **`ZCL_W01_TRAVEL_IMPORT`** que implemente `if_oo_adt_classrun` (se ejecuta con **F9** en ADT).
 
@@ -79,7 +56,7 @@ flowchart TD
 
 ---
 
-## 4. Casos de prueba
+## 3. Casos de prueba
 
 Lo importante de esta semana es la columna **"Falla en"**: tienes que predecir **dónde** sale cada error antes de ejecutarlo.
 
@@ -135,7 +112,7 @@ T08 ✅ Rechazado en MODIFY · causa <la que obtengas>
 
 ---
 
-## 5. Pistas (ábrelas solo si te atascas)
+## 4. Pistas (ábrelas solo si te atascas)
 
 <details>
 <summary>Antes de empezar · ¿qué ofrece la ventanilla?</summary>
@@ -189,7 +166,7 @@ El `FAILED` del `MODIFY` saldrá vacío. El error está en la respuesta del `COM
 
 ---
 
-## 6. Reto extra (opcional)
+## 5. Reto extra (opcional)
 
 | Reto | Qué aprendes |
 |---|---|
@@ -199,7 +176,7 @@ El `FAILED` del `MODIFY` saldrá vacío. El error está en la respuesta del `COM
 
 ---
 
-## 7. Preguntas de reflexión
+## 6. Preguntas de reflexión
 
 Respóndelas con tus palabras en el README del ejercicio. Son lo que miraré con más atención.
 
@@ -212,7 +189,7 @@ Respóndelas con tus palabras en el README del ejercicio. Son lo que miraré con
 
 ---
 
-## 8. Repaso (cap. 3)
+## 7. Repaso (cap. 3)
 
 - [ ] `/DMO/R_Travel_D` tiene `authorization master ( global, instance )`. ¿Qué métodos obliga a implementar?
 - [ ] Tiene `create ( precheck )`. ¿En qué se diferencia de una validation `on save { create; }`?
@@ -221,11 +198,11 @@ Respóndelas con tus palabras en el README del ejercicio. Son lo que miraré con
 
 ---
 
-## 9. Entrega y revisión
+## 8. Entrega y revisión
 
 **Entrega:** carpeta nueva en tu repo (p. ej. `Entrenamiento/01-eml-consumidor/`) con:
 
-- `README.md`: captura de la consola + respuestas del §7 y del §8.
+- `README.md`: captura de la consola + respuestas del §6 y del §7.
 - El código de la clase (en markdown, como haces ahora).
 
 **Qué revisaré:**
