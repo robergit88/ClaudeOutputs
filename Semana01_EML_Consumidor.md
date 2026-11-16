@@ -1,168 +1,220 @@
-# Semana 1 · EML como consumidor
+# Semana 1 · EML como consumidor de un BO ajeno
 
-> **Del 16 al 22 de noviembre de 2026** · Tiempo estimado: **1,5–2 h** · BO: **ZEXPENSE2** (`ZI_EXP_HEADER`) · Sistema: BTP trial
+> **Del 16 al 22 de noviembre de 2026** · Tiempo estimado: **1,5–2 h** · Sistema: BTP trial
+> BO que vas a consumir: **`/DMO/I_Travel_D`** (interfaz de BO del escenario de vuelos de SAP, ya instalado en el trial)
 
-**Objetivo:** manejar tu propio BO desde fuera, solo con EML, como lo haría otro programa o un job, sin Fiori ni Postman.
+**Objetivo:** usar un BO **que no es tuyo**, solo a través de su interfaz y con EML, como harás en S/4 con `I_SalesOrderTP` o `I_JournalEntryTP` en lugar de una BAPI.
 
 ---
 
-## 1. Qué vas a aprender
+## 0. Antes de nada: la idea con analogías
 
-| # | Idea clave | Capítulo |
+### 🛒 La transacción es una compra en el supermercado
+
+| En el súper | En RAP | Qué aprendes |
 |---|---|---|
-| 1 | Crear cabecera + gastos **en una sola sentencia**, enlazados con `%CID` / `%CID_REF` | Cap. 4, §3.2 |
-| 2 | Fuera del BO, **tú eres el dueño de la transacción**: sin `COMMIT ENTITIES` no se graba nada | Cap. 4, §3.5 |
-| 3 | **Dónde aparece cada error**: unos en `MODIFY`, otros en `COMMIT` | Cap. 5, §2 |
-| 4 | Leer `FAILED` / `REPORTED` y reaccionar (`ROLLBACK ENTITIES`) | Cap. 4, §2.2 |
+| Vas metiendo productos en el **carrito** | `MODIFY ENTITIES` → los cambios van al **buffer transaccional** | Nada está grabado todavía |
+| El reponedor **no te deja coger** un producto retirado de la venta | **Feature control**, autorización, **precheck**: fallan **en el `MODIFY`** | Hay errores que salen al meter en el carrito |
+| Pasas por **caja** | `COMMIT ENTITIES` → **save sequence** | Solo ahora se graba |
+| La cajera comprueba la tarjeta y ve que está **caducada** | **Validations** `on save`: fallan **en el `COMMIT`** | Hay errores que solo salen al pagar |
+| Si un producto falla en caja, **no se cobra nada** | **Todo o nada**: si una reserva falla, el viaje tampoco se graba | La LUW es una unidad |
+| **Vaciar el carrito** y volver a empezar | `ROLLBACK ENTITIES` | Si no lo vacías, arrastras lo que había |
+| El **ticket** te lo dan en caja, no antes | `TravelID` se asigna `on save` | Algunos datos solo existen tras el commit |
+| La hoja de incidencias: **qué** productos se rechazaron y **por qué** | `FAILED` (qué instancia) + `REPORTED` (qué mensaje) | Siempre hay que mirar los dos |
+
+### 🧳 `%CID` es la etiqueta de la maleta antes de facturar
+
+En el mostrador del aeropuerto, antes de tener el número de facturación, le pones a tus cosas una etiqueta provisional: "maleta 1", "maleta 2". Así, si la maleta 2 va dentro del viaje 1, se sabe a quién pertenece.
+
+- `%CID` = la etiqueta provisional que pones **tú**.
+- `%CID_REF` = "esta reserva pertenece a la maleta con la etiqueta X".
+- `MAPPED` = el **resguardo** que te devuelve el mostrador: "la etiqueta 'viaje 1' es el UUID 4F2A…".
+
+### 🏦 La interfaz de BO es la ventanilla del banco
+
+Tú no entras en la cámara acorazada (las tablas `/DMO/A_*`). Pides por **ventanilla** (`/DMO/I_Travel_D`) y el empleado aplica **sus** reglas. Solo puedes pedir lo que la ventanilla ofrece (`use create`, `use action acceptTravel`…). Si mañana el banco reorganiza la cámara, tu petición sigue funcionando: ese es el **contrato**.
 
 ---
 
-## 2. La idea en un diagrama
+## 1. Qué sustituye del ABAP tradicional
+
+| ABAP tradicional | RAP / EML | Diferencia clave |
+|---|---|---|
+| `BAPI_*_CREATE` | `MODIFY ENTITIES … CREATE` | Masivo: N instancias en una llamada |
+| Tablas de posiciones en la BAPI (`ITEMS`, `PARTNERS`…) | `CREATE BY \_Booking` + `%CID_REF` | Cabecera y posiciones en **la misma sentencia** |
+| `BAPI_*_GETDETAIL` | `READ ENTITIES` | Lee el **buffer**: ve lo no grabado |
+| `BAPI_*_CHANGE` + estructura **X** (`…X` / checkbox) | `UPDATE FIELDS ( … )` / `%control` | Misma idea: indicar qué campos cambian |
+| Tabla `RETURN` (`BAPIRET2`) | `FAILED` + `REPORTED` | Separan **qué** falló de **por qué** |
+| `BAPI_TRANSACTION_COMMIT` | `COMMIT ENTITIES` | Igual: lo pone el dueño de la transacción |
+| `BAPI_TRANSACTION_ROLLBACK` | `ROLLBACK ENTITIES` | Igual |
+| `ENQUEUE_E…` / `DEQUEUE_E…` | Automático (`lock master`) | Solo usarías `SET LOCKS` para otros BO |
+| `AUTHORITY-CHECK` en tu programa | Lo hace el BO | Tú no lo programas: el BO te rechaza |
+| `CALL FUNCTION … IN UPDATE TASK` | Save sequence | El framework decide el orden |
+| Batch input / `CALL TRANSACTION` | EML | Ya no se simula la pantalla |
+| Número de documento en el `EXPORTING` de la BAPI | `MAPPED` + releer tras el commit | Con numeración `on save`, el número llega **después** |
+
+> ⚠️ **La gran diferencia con una BAPI:** la BAPI comprueba casi todo **al llamarla**. RAP deja muchas comprobaciones (las validations) **para el commit**. Por eso un `MODIFY` sin errores **no** garantiza que se vaya a grabar.
+
+---
+
+## 2. El flujo en un diagrama
 
 ```mermaid
 flowchart LR
-    C[ZCL_EXP_W01_EML<br/>clase de consola] -- "MODIFY / READ / EXECUTE" --> RAP[[RAP runtime]]
-    RAP --> FC{"Feature control<br/>autorización"}
-    FC -- "❌ error aquí →<br/>FAILED del MODIFY" --> C
-    FC -- OK --> BUF[(Buffer<br/>transaccional)]
-    C -- "COMMIT ENTITIES" --> SS[Save sequence]
+    C[ZCL_W01_TRAVEL_IMPORT<br/>clase de consola] -- "MODIFY / READ / EXECUTE" --> I[["/DMO/I_Travel_D<br/>(ventanilla)"]]
+    I --> FC{"Feature control<br/>precheck · autorización<br/>lógica de la action"}
+    FC -- "❌ FAILED del MODIFY<br/>(el reponedor)" --> C
+    FC -- OK --> BUF[(Buffer<br/>= carrito)]
+    C -- "COMMIT ENTITIES<br/>(caja)" --> SS[Save sequence]
     BUF --> SS
-    SS --> DET["Determinations on save<br/>(total)"]
-    DET --> VAL{"Validations<br/>(importe, hotel)"}
-    VAL -- "❌ error aquí →<br/>FAILED del COMMIT" --> C
+    SS --> DET["Determinations on save<br/>TravelID, BookingID"]
+    DET --> VAL{"Validations<br/>fechas · cliente · vuelo"}
+    VAL -- "❌ FAILED del COMMIT<br/>(tarjeta caducada)" --> C
     VAL -- OK --> DB[(BD)]
 ```
-
-**Fíjate:** en tu BO managed sin draft, las validations **no** se ejecutan en el `MODIFY`. El `MODIFY` puede ir bien y el `COMMIT` fallar después.
 
 ---
 
 ## 3. Escenario
 
-> Ana (cliente que exista en `/DMO/I_Customer`) vuelve de un viaje a Madrid. Un programa nocturno crea su informe con dos gastos, lo intenta enviar, se le añade el recibo que falta, lo envía y el responsable lo rechaza.
+> Una **agencia online** recibe cada noche las solicitudes de viaje de su web. Un programa en SAP (el tuyo) las convierte en viajes con sus reservas, aplica descuentos y acepta los que estén listos. Nadie está delante: **si algo falla, el programa debe saberlo y no dejar basura.**
 
 ```mermaid
 stateDiagram-v2
-    [*] --> OPEN : T01 crear (hotel + taxi)
-    OPEN --> OPEN : T05 send ❌ falta recibo
-    OPEN --> SENT : T06 adjuntar + send ✅
-    SENT --> SENT : T07 update ❌ bloqueado
-    SENT --> SENT : T08a reject ❌ motivo corto
-    SENT --> REJECTED : T08b reject ✅
+    [*] --> O : T01 crear viaje + 2 reservas
+    O --> O : T03 descuento 10 % ✅
+    O --> O : T04 descuento 150 % ❌
+    O --> A : T07 acceptTravel ✅
+    A --> A : T08 descuento ❌ bloqueado
+    state "Nunca llegan a grabarse" as N {
+        T05 : T05 fecha en el pasado ❌
+        T06 : T06 vuelo inexistente ❌
+    }
 ```
+
+`O` = Open, `A` = Accepted, `X` = Rejected (constantes del BO).
 
 ---
 
-## 4. Qué tienes que construir
+## 4. Lo que tienes que construir
 
-Una clase **`ZCL_EXP_W01_EML`** que implemente `if_oo_adt_classrun` (se ejecuta con **F9** en ADT).
+Una clase **`ZCL_W01_TRAVEL_IMPORT`** que implemente `if_oo_adt_classrun` (se ejecuta con **F9** en ADT).
 
 ```mermaid
 flowchart TD
-    M[main] --> T01 & T02 & T03 & T04 & T05 & T06 & T07 & T08
-    T01 & T02 & T03 & T04 & T05 & T06 & T07 & T08 --> LOG["log( id, ok, texto )<br/>escribe ✅ / ❌ en consola"]
+    M[main] --> P[prepare: elige agencia, cliente y 2 vuelos reales]
+    P --> T01 & T02 & T03 & T04 & T05 & T06 & T07 & T08
+    T01 & T02 & T03 & T04 & T05 & T06 & T07 & T08 --> LOG["log( id, ok, texto )<br/>✅ / ❌ en consola"]
 ```
 
-- **Un método por caso** (`t01_create_deep`, `t02_read_by_assoc`…).
-- **Un método `log`** que imprime `ID · OK/KO · detalle`.
-- Al final, un resumen: `7/8 OK`.
+- **`prepare`**: lee **datos maestros** existentes (agencia, cliente y 2 vuelos futuros) desde sus CDS de lectura (`/DMO/I_Agency`, `/DMO/I_Customer`, `/DMO/I_Flight`). Así tus casos no dependen de IDs escritos a mano.
+- **Un método por caso** y un método `log` que imprime `ID · OK/KO · detalle`.
+- Al final, un resumen: `8/8 OK`.
 
 ### Reglas del juego
 
 | ✅ Obligatorio | 🚫 Prohibido |
 |---|---|
-| Todo el acceso al BO con **EML** | `SELECT`, `INSERT` o `UPDATE` sobre `ZEXPENSE_*` |
-| Recoger **siempre** `FAILED` y `REPORTED` | `IN LOCAL MODE`: estás fuera del BO |
-| `COMMIT ENTITIES` **solo si** `FAILED` está vacío | Dejar un error sin `ROLLBACK ENTITIES` |
-| Identificar instancias con `%tky` | Ignorar el resultado de una action |
-| Cada caso crea sus propios datos (o usa los de T01) | Depender de datos creados a mano en Fiori |
+| Escribir **solo** a través de `/DMO/I_Travel_D` | Tocar `/DMO/R_Travel_D` o las tablas `/DMO/A_*` |
+| Leer maestros (agencia, cliente, vuelo) con `SELECT` sobre sus CDS | `SELECT` sobre viajes o reservas para comprobar resultados: usa `READ ENTITIES` |
+| Recoger **siempre** `FAILED` y `REPORTED` | `IN LOCAL MODE` (estás fuera del BO) |
+| `COMMIT ENTITIES` **solo si** no hay `FAILED` | Dejar un error sin `ROLLBACK ENTITIES` |
+| Instancias activas: `%is_draft = if_abap_behv=>mk-off` | Mirar el código de `/DMO/BP_TRAVEL_D` **antes** de intentarlo (después, sí) |
+| Identificar instancias con `%tky` | Depender de un `TravelID` fijo |
 
 ---
 
 ## 5. Casos de prueba
 
-**Leyenda de la columna "Falla en":** dónde esperas ver el error. Es lo que más importa entender esta semana.
+Lo importante de esta semana es la columna **"Falla en"**: tienes que predecir **dónde** sale cada error antes de ejecutarlo.
 
 | ID | Qué haces | Resultado esperado | Falla en |
 |---|---|---|---|
-| **T01** | Crear un informe con 2 gastos en **un solo** `MODIFY` (hotel 120 €, taxi 30 €). Commit | `MAPPED` trae el `report_id` asignado. Tras releer: estado `OPEN`, moneda `EUR`, total **150** | — |
-| **T02** | Leer los gastos del informe de T01 **por asociación** | 2 gastos, importes 120 y 30 | — |
-| **T03** | Cambiar el motivo (`reason`) del informe. Commit y releer | El motivo nuevo está grabado | — |
-| **T04** ❌ | Crear un informe nuevo con un gasto de **0 €**. Commit | El commit devuelve `FAILED` del item con un mensaje en `REPORTED`. Haces `ROLLBACK ENTITIES`. El informe **no existe** en BD | `COMMIT` |
-| **T05** ❌ | Al informe de T01 le añades un gasto de comida de 55 € sin adjunto. Ejecutas `send` | La action devuelve `FAILED` + mensaje en el header. El estado sigue en `OPEN` | `MODIFY` (action) |
-| **T06** | Crea un adjunto (PDF de prueba) para cada gasto de más de 50 € **por asociación**. `send` de nuevo. Commit | Estado `SENT` | — |
-| **T07** ❌ | Intentar cambiar el motivo del informe en `SENT` | `FAILED` del header. Comprueba **qué causa** (`%fail-cause`) devuelve | `MODIFY` |
-| **T08** | a) `reject` con motivo "No" ❌ → error, sigue `SENT`. b) `reject` con un motivo de 10+ caracteres → `REJECTED` y `reject_reason` grabado | a) `FAILED`; b) `REJECTED` | a) `MODIFY` (action) |
+| **T01** | Crear **un** viaje con **2 reservas** en un solo `MODIFY`. **Antes del commit**, lee `TravelID` y `TotalPrice`. Commit y vuelve a leer | Antes: `TotalPrice` calculado, `TravelID` **vacío**. Después: `TravelID` asignado, estado `O` | — |
+| **T02** | Leer las reservas del viaje de T01 **por asociación** | 2 reservas, cada una con su `BookingID` | — |
+| **T03** | `deductDiscount` del 10 % sobre el viaje de T01. Commit | `BookingFee` baja un 10 % y `TotalPrice` se recalcula | — |
+| **T04** ❌ | `deductDiscount` del **150 %** | `FAILED` + mensaje. `BookingFee` no cambia | `MODIFY` (lógica de la action) |
+| **T05** ❌ | Crear un viaje con `BeginDate` = **ayer**. Commit | El `MODIFY` va bien. El commit devuelve `FAILED` del viaje. `ROLLBACK`. El viaje **no existe** | `COMMIT` |
+| **T06** ❌ | Crear un viaje correcto con **1 reserva de un vuelo que no existe**. Commit | El commit falla por la **reserva**, y el viaje **tampoco** se graba | `COMMIT` (todo o nada) |
+| **T07** | `acceptTravel` sobre el viaje de T01. Commit | Estado `A` | — |
+| **T08** ❌ | `deductDiscount` sobre el viaje **aceptado** | `FAILED` del viaje. Anota **qué** `%fail-cause` devuelve | `MODIFY` (feature control) |
 
-### Comprobación manual (2 minutos)
+### Comprobación visual (2 minutos)
 
-Al terminar, abre la app Fiori de ZEXPENSE2:
+El escenario trae su propia app: el service binding **`/DMO/UI_TRAVEL_D_D_O4`** (botón *Preview* en ADT).
 
-- [ ] El informe de T01 aparece **rechazado** (semáforo rojo), con su motivo.
-- [ ] Tiene 3 gastos y adjuntos en los de más de 50 €.
-- [ ] El informe de T04 **no** aparece.
+- [ ] El viaje de T01 aparece **aceptado**, con 2 reservas y la tarifa con descuento.
+- [ ] Los viajes de T05 y T06 **no** aparecen.
 
 ### Salida esperada en consola
 
 ```text
-T01 ✅ Informe 0000000012 creado · total 150.00 EUR · estado OPEN
-T02 ✅ 2 gastos leídos por asociación
-T03 ✅ Motivo actualizado
-T04 ✅ Commit rechazado como se esperaba: "<tu mensaje de importe>"
-T05 ✅ Send rechazado como se esperaba: "<tu mensaje de recibo>"
-T06 ✅ Informe enviado · estado SENT
-T07 ✅ Update rechazado · causa <la que obtengas>
-T08 ✅ a) motivo corto rechazado · b) estado REJECTED
+T01 ✅ Viaje 00004711 creado · antes del commit TravelID = '' · total 1.234,00 USD
+T02 ✅ 2 reservas leídas por asociación (BookingID 0001, 0002)
+T03 ✅ Descuento aplicado · BookingFee 40,00 → 36,00
+T04 ✅ Rechazado en MODIFY: "<mensaje del BO>"
+T05 ✅ MODIFY sin errores · rechazado en COMMIT: "<mensaje del BO>"
+T06 ✅ Rechazado en COMMIT por la reserva · el viaje tampoco existe
+T07 ✅ Viaje aceptado · estado A
+T08 ✅ Rechazado en MODIFY · causa <la que obtengas>
 ──────────
 8/8 OK
 ```
 
-> Un caso negativo está **OK** cuando falla **donde y como se esperaba**. Si T04 graba el informe, el caso es **KO**.
+> Un caso negativo está **OK** cuando falla **donde y como se esperaba**. Si T05 graba el viaje, el caso es **KO**.
 
 ---
 
 ## 6. Pistas (ábrelas solo si te atascas)
 
 <details>
+<summary>Antes de empezar · ¿qué ofrece la ventanilla?</summary>
+
+Abre `/DMO/I_Travel_D` (BDEF) en ADT. Todo lo que puedes hacer está en sus líneas `use …`. Pon el cursor en `/DMO/I_Travel_D` y pulsa **F2**. Fíjate en el alias de cada entidad: lo vas a necesitar después de `ENTITY`.
+</details>
+
+<details>
 <summary>T01 · Nivel 1: dónde mirar</summary>
 
-Resumen cap. 4, §3.2 "Create-by-association" y §5.1 (pedido de venta completo en una sentencia). Tu BDEF usa `early numbering`: la clave no la pones tú.
+Resumen cap. 4: §3.2 "Create-by-association" y §5.1 (pedido completo en una sentencia). La clave del viaje es un UUID que pone el BO (`numbering : managed`): tú solo pones el `%cid`.
 </details>
 
 <details>
 <summary>T01 · Nivel 2: qué sintaxis</summary>
 
-`CREATE FIELDS ( … ) WITH` para el header con un `%cid`; `CREATE BY \_Items` con `%cid_ref` y `%target`. La clave asignada sale en `MAPPED-header`. **Experimento:** lee el total **antes** del commit y apúntalo. ¿Por qué sale distinto?
+`CREATE FIELDS ( AgencyID CustomerID BeginDate EndDate BookingFee CurrencyCode Description ) WITH …` para el viaje. `CREATE BY \_Booking` con `%cid_ref` y `%target` para las reservas (`CustomerID`, `AirlineID`, `ConnectionID`, `FlightDate`, `FlightPrice`, `CurrencyCode`, `BookingStatus`). El UUID creado sale en `MAPPED-travel`.
+
+**Pregunta para pensar:** ¿por qué `TotalPrice` ya tiene valor antes del commit y `TravelID` no? Mira las determinations del BO base y su momento (`on modify` / `on save`).
 </details>
 
 <details>
-<summary>T04 · Nivel 1</summary>
+<summary>T03 / T04 / T07 · Nivel 1</summary>
 
-Resumen cap. 4, §3.5 `COMMIT ENTITIES` y su complemento `RESPONSE OF`. Repasa en el cap. 5 en qué fase se ejecutan las validations.
+Resumen cap. 4, §3.2 "Execute (actions)". `deductDiscount` tiene parámetro: mira la entidad abstracta que declara.
 </details>
 
 <details>
-<summary>T04 · Nivel 2</summary>
+<summary>T03 / T04 / T07 · Nivel 2</summary>
 
-El `FAILED` del `MODIFY` saldrá vacío. El error está en la respuesta del `COMMIT ENTITIES`. Después del fallo, el buffer sigue "sucio": `ROLLBACK ENTITIES`.
+`EXECUTE deductDiscount FROM VALUE #( ( %tky = … %param-discount_percent = … ) )`. Las actions devuelven `RESULT`: úsalo para comprobar el nuevo `BookingFee` sin otro `READ`.
 </details>
 
 <details>
-<summary>T05 / T06 / T08 · Nivel 1</summary>
+<summary>T05 / T06 · Nivel 1</summary>
 
-Resumen cap. 4, §3.2 "Execute (actions)". `reject` lleva parámetro: mira tu entidad abstracta `ZA_EXP_REJECT_PARAM`.
+Resumen cap. 4, §3.5 `COMMIT ENTITIES` y su complemento `RESPONSE OF`. Repasa en el cap. 5 en qué paso de la save sequence se ejecutan las validations.
 </details>
 
 <details>
-<summary>T05 / T06 / T08 · Nivel 2</summary>
+<summary>T05 / T06 · Nivel 2</summary>
 
-`EXECUTE send FROM VALUE #( ( %tky = … ) )`. El parámetro de `reject` va en `%param`. El adjunto se crea desde la entidad `item` con `CREATE BY \_Attachments`; `file_content` admite un `xstring` cualquiera de prueba.
+El `FAILED` del `MODIFY` saldrá vacío. El error está en la respuesta del `COMMIT ENTITIES RESPONSE OF /DMO/I_Travel_D`. En T06 busca el error en `failed-booking`, no en `failed-travel`. Después del fallo, el carrito sigue lleno: `ROLLBACK ENTITIES`.
 </details>
 
 <details>
-<summary>T07 · Nivel 1</summary>
+<summary>T08 · Nivel 1</summary>
 
-¿Qué impide editar un informe `SENT`: una validation, una autorización o el feature control? Mira tu `get_instance_features`.
+¿Qué te impide aplicar un descuento a un viaje aceptado: una validation, una autorización o el feature control? Mira en la BDEF base qué tiene `features : instance`.
 </details>
 
 ---
@@ -171,27 +223,31 @@ Resumen cap. 4, §3.2 "Execute (actions)". `reject` lleva parámetro: mira tu en
 
 | Reto | Qué aprendes |
 |---|---|
-| Antes de T07, pregunta con `GET PERMISSIONS` si el update está permitido y no lo intentes si no | Preguntar antes de actuar (cap. 4, §3.3) |
-| Repite T01 con `AUTO FILL CID` | Ahorrarte inventar `%cid` |
+| Antes de T08, pregunta con `GET PERMISSIONS` si `deductDiscount` está habilitado, y no lo intentes si no | Preguntar antes de actuar (cap. 4, §3.3) |
+| Repite T03 pasando por el **draft**: `Edit` → `deductDiscount` sobre el draft → `Activate` | Es exactamente lo que hace Fiori por debajo |
+| Repite T01 con `AUTO FILL CID` | Ahorrarte inventar etiquetas |
 
 ---
 
 ## 8. Preguntas de reflexión
 
-Respóndelas con tus palabras en el README del ejercicio. Son las que miraré con más atención.
+Respóndelas con tus palabras en el README del ejercicio. Son lo que miraré con más atención.
 
-1. En T01, ¿por qué el total leído **antes** del commit no es 150?
-2. T04 y T07 fallan en momentos distintos. Explica por qué con el diagrama del §2.
-3. ¿Qué pasaría en T04 si te olvidas del `ROLLBACK ENTITIES` y en el mismo programa haces otro `MODIFY` + `COMMIT` correcto?
+1. En T01, ¿por qué `TotalPrice` tiene valor antes del commit y `TravelID` no? Explícalo con la analogía del súper.
+2. T04 y T05 son errores de datos, pero fallan en momentos distintos. ¿Por qué?
+3. En T06 la reserva es la que falla. ¿Por qué tampoco se graba el viaje? ¿Era así con las BAPIs?
+4. ¿Qué pasaría si después de T05 no haces `ROLLBACK ENTITIES` y en el mismo programa creas otro viaje correcto y haces commit?
 
-**🎤 Pregunta de entrevista:** *"Tenemos un report que crea pedidos con BAPI. ¿Cómo lo harías en S/4 con RAP y qué cambia en el manejo de errores?"* Responde en 4–5 líneas.
+**🎤 Pregunta de entrevista:** *"Tenemos un report que crea pedidos con `BAPI_SALESORDER_CREATEFROMDAT2`. ¿Cómo lo harías en S/4 Cloud y qué cambia en el manejo de errores?"* Responde en 4 o 5 líneas.
 
 ---
 
 ## 9. Repaso (cap. 3)
 
-- [ ] Tu header tiene `authorization master ( global )`. ¿Qué método obliga a implementar y qué **no** puede comprobar?
-- [ ] Tus validations son `on save`. ¿Podría `validateAmount` ser `on modify`?
+- [ ] `/DMO/R_Travel_D` tiene `authorization master ( global, instance )`. ¿Qué métodos obliga a implementar?
+- [ ] Tiene `create ( precheck )`. ¿En qué se diferencia de una validation `on save { create; }`?
+
+> En el trial, la autorización de este BO está **simulada**: siempre concede. Por eso no hay caso negativo de autorización: llega en la semana 2, en tu propio BO.
 
 ---
 
@@ -199,27 +255,29 @@ Respóndelas con tus palabras en el README del ejercicio. Son las que miraré co
 
 **Entrega:** carpeta nueva en tu repo (p. ej. `Entrenamiento/01-eml-consumidor/`) con:
 
-- `README.md`: captura de la consola + respuestas del §8 y §9.
-- El código de la clase (como haces ahora, en markdown).
+- `README.md`: captura de la consola + respuestas del §8 y del §9.
+- El código de la clase (en markdown, como haces ahora).
 
 **Qué revisaré:**
 
 | Criterio | Peso |
 |---|---|
-| Los 8 casos pasan, y los negativos fallan **donde** deben | ⭐⭐⭐ |
+| Los 8 casos pasan y los negativos fallan **donde** deben | ⭐⭐⭐ |
+| Solo se usa la interfaz `/DMO/I_Travel_D` | ⭐⭐⭐ |
+| Ningún commit con `FAILED` lleno y ningún error sin rollback | ⭐⭐ |
 | Código masivo (tablas, `VALUE #( FOR … )`) y con `%tky` | ⭐⭐ |
-| No hay commits con `FAILED` lleno ni errores sin rollback | ⭐⭐ |
 | Respuestas de reflexión con tus palabras | ⭐⭐ |
 | ATC limpio (variante cloud) | ⭐ |
 
 ### Autoevaluación antes de entregar
 
-- [ ] He ejecutado la clase **dos veces seguidas** y sigue dando 8/8 (no depende de datos anteriores).
-- [ ] Sé explicar sin mirar qué es `%cid`, `%cid_ref` y `%tky`.
-- [ ] Sé decir de memoria en qué fase se ejecuta cada regla de mi BO.
+- [ ] He ejecutado la clase **dos veces seguidas** y da 8/8 las dos veces.
+- [ ] Sé explicar sin mirar qué son `%cid`, `%cid_ref`, `%tky` y `MAPPED`.
+- [ ] Sé decir, para cada regla del BO, si falla en el `MODIFY` o en el `COMMIT`.
 
 ---
 
-> ⚠️ **Antes de empezar, dos comprobaciones en tu sistema:**
-> 1. En tu documentación, el límite de hotel de `validateHotelLimit` es **150 €**, pero la tabla `ZEXPENSE_TYPE` dice **300**. Mira cuál usa tu código: el hotel de T01 (120 €) debe quedar por debajo.
-> 2. El campo de motivo de `ZA_EXP_REJECT_PARAM` y la causa exacta de T07 dependen de tu implementación. Por eso no los doy: descúbrelos tú.
+> ⚠️ **Tres comprobaciones antes de empezar:**
+> 1. Abre `/DMO/I_Travel_D` en ADT y comprueba que existe con `acceptTravel`, `deductDiscount` y la asociación `_Booking`. Tu trial puede tener una versión algo distinta de la que he revisado.
+> 2. El trial es un sistema **compartido**: puede haber viajes de otros usuarios. Por eso cada caso crea los suyos y nunca usa IDs fijos.
+> 3. Los vuelos del escenario tienen fechas generadas al instalarlo. En `prepare` elige vuelos con `FlightDate` **en el futuro**; si no hay, avísame.
