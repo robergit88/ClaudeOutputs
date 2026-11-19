@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "zexpense2": {
+      "command": "node",
+      "args": [
+        "C:\\Users\\roberto.puma\\Documents\\GitHub\\ClaudeOutputs\\MCP\\src\\index.js"
+      ]
+    }
+  }
+}

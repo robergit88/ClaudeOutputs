@@ -1,0 +1,20 @@
+{
+  "name": "zexpense2-mcp",
+  "version": "0.1.0",
+  "description": "Servidor MCP de solo lectura sobre la API web ZEXPENSE2 (ABAP Environment)",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "login": "node src/login.js",
+    "register": "node src/register.js"
+  },
+  "engines": {
+    "node": ">=20.12"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.0",
+    "open": "^10.1.0",
+    "zod": "^3.25.0"
+  }
+}
