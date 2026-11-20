@@ -5,7 +5,7 @@ Claude consulta los **informes de gastos** de la app RAP ZEXPENSE2 a través de 
 ```mermaid
 flowchart LR
     A[Claude Desktop] -->|MCP stdio| B[zexpense2-mcp<br/>Node.js · tu PC]
-    B -->|GET OData V4<br/>Bearer token| C[ZSD_EXPENSES_API<br/>ExpenseReport]
+    B -->|GET OData V4<br/>Bearer token| C[ZSD_EXPENSES_API<br/>ExpenseReport · ExpenseItem]
     B -.->|login 1ª vez<br/>refresh token| D[XSUAA<br/>BTP trial]
     C --> E[(BO ZI_EXP_HEADER)]
 ```
@@ -13,6 +13,7 @@ flowchart LR
 | Herramienta | Qué hace | Escribe |
 |---|---|---|
 | `buscar_informes_gastos` | Cabeceras filtradas por id, cliente, estado y fechas | ❌ No |
+| `ver_posiciones_informe` | Posiciones de un informe + total por moneda | ❌ No |
 
 ---
 
